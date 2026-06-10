@@ -1,8 +1,5 @@
 import type { NextConfig } from 'next';
 
-const nextConfig: NextConfig = {
-  // Clean output for Vercel deployment
-  output: 'standalone',
-};
+const nextConfig: NextConfig = {};
 
 export default nextConfig;
