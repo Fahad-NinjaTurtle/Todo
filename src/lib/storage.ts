@@ -1,4 +1,4 @@
-import { AppState, ActivityEntry } from '@/types';
+import { AppState, ActivityEntry, PomodoroStats } from '@/types';
 import { generateId } from './utils';
 
 const STORAGE_KEY = 'taskflow_data';
@@ -6,19 +6,23 @@ const STORAGE_KEY = 'taskflow_data';
 const DEFAULT_STATE: AppState = {
   projects: [],
   activity: [],
+  devLog: [],
+  learnings: [],
+  pomodoroSessions: [],
 };
 
-// Safe localStorage access — Next.js runs on server too
 export function loadState(): AppState {
   if (typeof window === 'undefined') return DEFAULT_STATE;
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return DEFAULT_STATE;
     const parsed = JSON.parse(raw) as AppState;
-    // Ensure arrays exist even on older saved data
     return {
       projects: parsed.projects ?? [],
       activity: parsed.activity ?? [],
+      devLog: parsed.devLog ?? [],
+      learnings: parsed.learnings ?? [],
+      pomodoroSessions: parsed.pomodoroSessions ?? [],
     };
   } catch {
     return DEFAULT_STATE;
@@ -54,6 +58,9 @@ export function importData(file: File): Promise<AppState> {
         resolve({
           projects: state.projects ?? [],
           activity: state.activity ?? [],
+          devLog: state.devLog ?? [],
+          learnings: state.learnings ?? [],
+          pomodoroSessions: state.pomodoroSessions ?? [],
         });
       } catch {
         reject(new Error('Invalid JSON backup file'));
@@ -77,5 +84,40 @@ export function createActivity(
     projectId,
     taskId,
     timestamp: new Date().toISOString(),
+  };
+}
+
+// Pomodoro XP system
+const XP_PER_SESSION = 25;
+const XP_PER_LEVEL = 200;
+
+export function computePomodoroStats(sessions: AppState['pomodoroSessions']): PomodoroStats {
+  const workSessions = sessions.filter(s => s.type === 'work');
+  const totalSessions = workSessions.length;
+  const totalMinutes = workSessions.reduce((acc, s) => acc + s.duration, 0);
+  const totalXP = totalSessions * XP_PER_SESSION;
+  const level = Math.floor(totalXP / XP_PER_LEVEL) + 1;
+  const xp = totalXP % XP_PER_LEVEL;
+
+  // Calculate streak (consecutive days with at least 1 work session)
+  const sessionDays = new Set(workSessions.map(s => s.completedAt.split('T')[0]));
+  let streak = 0;
+  const today = new Date();
+  for (let i = 0; i < 365; i++) {
+    const d = new Date(today);
+    d.setDate(d.getDate() - i);
+    const key = d.toISOString().split('T')[0];
+    if (sessionDays.has(key)) streak++;
+    else if (i > 0) break; // gap found
+  }
+
+  return {
+    totalSessions,
+    totalMinutes,
+    currentStreak: streak,
+    longestStreak: streak, // simplified
+    level,
+    xp,
+    xpToNextLevel: XP_PER_LEVEL,
   };
 }

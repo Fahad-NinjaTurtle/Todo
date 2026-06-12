@@ -1,30 +1,65 @@
 @import "tailwindcss";
 
+/* Dark mode via .dark class on <html> */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    --bg-base: #f8fafc;
+    --bg-surface: #ffffff;
+    --bg-raised: #f1f5f9;
+    --border: #e2e8f0;
+    --border-subtle: #f1f5f9;
+    --text-primary: #0f172a;
+    --text-secondary: #475569;
+    --text-muted: #94a3b8;
+    --accent: #6366f1;
+    --accent-hover: #4f46e5;
+  }
+  .dark {
+    --bg-base: #0d1117;
+    --bg-surface: #161b22;
+    --bg-raised: #21262d;
+    --border: #30363d;
+    --border-subtle: #21262d;
+    --text-primary: #e6edf3;
+    --text-secondary: #8b949e;
+    --text-muted: #484f58;
+    --accent: #818cf8;
+    --accent-hover: #6366f1;
+  }
+  * { box-sizing: border-box; }
+  body { background: var(--bg-base); color: var(--text-primary); }
+}
+
 @layer utilities {
-  .animate-in {
-    animation: slideIn 0.2s ease-out;
+  /* Semantic token utilities */
+  .bg-base    { background-color: var(--bg-base); }
+  .bg-surface { background-color: var(--bg-surface); }
+  .bg-raised  { background-color: var(--bg-raised); }
+  .border-base { border-color: var(--border); }
+  .border-subtle { border-color: var(--border-subtle); }
+  .text-primary   { color: var(--text-primary); }
+  .text-secondary { color: var(--text-secondary); }
+  .text-muted     { color: var(--text-muted); }
+
+  .animate-in { animation: fadeSlideIn 0.18s ease-out; }
+  @keyframes fadeSlideIn {
+    from { opacity: 0; transform: translateY(6px); }
+    to   { opacity: 1; transform: translateY(0); }
   }
-  @keyframes slideIn {
-    from {
-      opacity: 0;
-      transform: translateY(8px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
+  .slide-in-from-bottom-2 { animation: slideUp 0.22s ease-out; }
+  @keyframes slideUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
   }
-  .slide-in-from-bottom-2 {
-    animation: slideInFromBottom 0.25s ease-out;
+  /* Pomodoro ring animation */
+  .timer-ring { transition: stroke-dashoffset 1s linear; }
+
+  /* XP bar shine */
+  @keyframes xpShine {
+    from { transform: translateX(-100%); }
+    to   { transform: translateX(400%); }
   }
-  @keyframes slideInFromBottom {
-    from {
-      opacity: 0;
-      transform: translateY(12px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
+  .xp-shine { animation: xpShine 2s ease-in-out infinite; }
 }

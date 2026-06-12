@@ -11,19 +11,19 @@ export interface Task {
   description: string;
   status: TaskStatus;
   priority: Priority;
-  dueDate: string | null;    // ISO date string
-  progressNotes: string;     // "What I have done"
-  createdAt: string;         // ISO datetime string
-  updatedAt: string;         // ISO datetime string
+  dueDate: string | null;
+  progressNotes: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface Project {
   id: string;
   name: string;
-  client: string;            // Client or department
+  client: string;
   priority: Priority;
   status: ProjectStatus;
-  deadline: string | null;   // ISO date string
+  deadline: string | null;
   notes: string;
   createdAt: string;
   updatedAt: string;
@@ -40,9 +40,56 @@ export interface ActivityEntry {
   timestamp: string;
 }
 
+// Dev Log
+export interface DevLogEntry {
+  id: string;
+  date: string;         // ISO date (YYYY-MM-DD)
+  projectId: string | null;
+  title: string;
+  content: string;      // what I did today
+  mood: 'great' | 'good' | 'okay' | 'rough';
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Learnings
+export interface Learning {
+  id: string;
+  title: string;
+  content: string;
+  tags: string[];       // e.g. ["React", "TypeScript"]
+  source: string;       // book, article, video, colleague, etc.
+  projectId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Pomodoro
+export interface PomodoroSession {
+  id: string;
+  completedAt: string;
+  duration: number;     // minutes (25 = work, 5/15 = break)
+  type: 'work' | 'short_break' | 'long_break';
+  projectId: string | null;
+  label: string;
+}
+
+export interface PomodoroStats {
+  totalSessions: number;
+  totalMinutes: number;
+  currentStreak: number; // days in a row
+  longestStreak: number;
+  level: number;
+  xp: number;
+  xpToNextLevel: number;
+}
+
 export interface AppState {
   projects: Project[];
   activity: ActivityEntry[];
+  devLog: DevLogEntry[];
+  learnings: Learning[];
+  pomodoroSessions: PomodoroSession[];
 }
 
 export interface FilterState {
@@ -54,7 +101,6 @@ export interface FilterState {
   sortOrder: 'asc' | 'desc';
 }
 
-// For the dashboard summary cards
 export interface DashboardStats {
   totalProjects: number;
   completedProjects: number;
