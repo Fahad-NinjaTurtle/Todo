@@ -4,7 +4,8 @@ import { Play, Pause, RotateCcw, SkipForward, Flame, Zap, Trophy, Star, Coffee, 
 import { useApp } from '@/context/AppContext';
 import { useToastContext } from '@/context/ToastContext';
 import { computePomodoroStats } from '@/lib/storage';
-import { PomodoroSession } from '@/types';
+import { localDayKey, todayISO } from '@/lib/utils';
+import { FocusSession } from '@/types';
 
 // Timer configs in seconds
 const MODES = {
@@ -24,7 +25,7 @@ const RING_C  = 2 * Math.PI * RING_R;
 function pad(n: number) { return String(n).padStart(2, '0'); }
 
 export default function PomodoroPage() {
-  const { state, addPomodoroSession } = useApp();
+  const { state, addFocusSession } = useApp();
   const { toast } = useToastContext();
 
   const [mode, setMode]             = useState<Mode>('work');
@@ -36,7 +37,7 @@ export default function PomodoroPage() {
   const [showLevelUp, setShowLevelUp] = useState(false);
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const stats = computePomodoroStats(state.pomodoroSessions);
+  const stats = computePomodoroStats(state.focusSessions);
   const prevLevel = useRef(stats.level);
 
   // Switch mode
@@ -66,14 +67,16 @@ export default function PomodoroPage() {
 
   const handleComplete = useCallback(() => {
     setRunning(false);
-    const session: Omit<PomodoroSession, 'id'> = {
+    const session: Omit<FocusSession, 'id'> = {
       completedAt: new Date().toISOString(),
       duration: Math.round(MODES[mode].seconds / 60),
       type: mode,
       projectId: projectId || null,
+      taskId: null,
+      areaId: null,
       label: label || MODES[mode].label,
     };
-    addPomodoroSession(session);
+    addFocusSession(session);
 
     if (mode === 'work') {
       const newCount = sessionCount + 1;
@@ -86,7 +89,7 @@ export default function PomodoroPage() {
       toast(`Break over — time to focus!`);
       setTimeout(() => switchMode('work'), 800);
     }
-  }, [mode, sessionCount, projectId, label, addPomodoroSession, toast, switchMode]);
+  }, [mode, sessionCount, projectId, label, addFocusSession, toast, switchMode]);
 
   // Check for level up
   useEffect(() => {
@@ -117,16 +120,15 @@ export default function PomodoroPage() {
 
   const xpPercent = Math.round((stats.xp / stats.xpToNextLevel) * 100);
 
-  const todaySessions = state.pomodoroSessions.filter(s =>
-    s.type === 'work' && s.completedAt.startsWith(new Date().toISOString().split('T')[0])
+  const todaySessions = state.focusSessions.filter(s =>
+    s.type === 'work' && localDayKey(s.completedAt) === todayISO()
   ).length;
 
   return (
-    <div className="flex-1 overflow-y-auto">
-      <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6">
+    <div className="max-w-2xl mx-auto px-4 sm:px-6 py-6 pb-8">
         <div className="mb-6">
-          <h1 className="text-xl font-bold text-primary">Pomodoro</h1>
-          <p className="text-sm text-muted mt-0.5">Focus in sprints · Level up your productivity</p>
+          <h1 className="text-xl font-bold text-primary">Focus Session</h1>
+          <p className="text-sm text-muted mt-0.5">Pomodoro timer · Deep work sprints</p>
         </div>
 
         {/* Level up banner */}
@@ -271,11 +273,11 @@ export default function PomodoroPage() {
         </div>
 
         {/* Session history */}
-        {state.pomodoroSessions.length > 0 && (
+        {state.focusSessions.length > 0 && (
           <div className="bg-surface border border-base rounded-2xl p-5">
             <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-3">Recent Sessions</h3>
             <div className="space-y-2">
-              {state.pomodoroSessions.slice(0, 8).map(s => {
+              {state.focusSessions.slice(0, 8).map(s => {
                 const isWork = s.type === 'work';
                 const proj = s.projectId ? state.projects.find(p => p.id === s.projectId) : null;
                 const time = new Date(s.completedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -299,7 +301,6 @@ export default function PomodoroPage() {
             </div>
           </div>
         )}
-      </div>
     </div>
   );
 }

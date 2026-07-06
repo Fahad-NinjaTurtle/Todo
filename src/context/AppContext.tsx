@@ -1,60 +1,72 @@
 'use client';
 
-import React, { createContext, useContext, useEffect, useReducer, useCallback } from 'react';
-import { Project, Task, AppState, FilterState, DevLogEntry, Learning, PomodoroSession } from '@/types';
-import { loadState, saveState, createActivity } from '@/lib/storage';
-import { generateId } from '@/lib/utils';
-
-type View = 'dashboard' | 'project' | 'devlog' | 'learnings' | 'pomodoro';
-
-interface AppContextValue {
-  state: AppState;
-  filters: FilterState;
-  selectedProjectId: string | null;
-  view: View;
-  hydrated: boolean;
-
-  addProject: (data: Omit<Project, 'id' | 'createdAt' | 'updatedAt' | 'tasks'>) => void;
-  updateProject: (id: string, data: Partial<Omit<Project, 'id' | 'createdAt' | 'tasks'>>) => void;
-  deleteProject: (id: string) => void;
-
-  addTask: (projectId: string, data: Omit<Task, 'id' | 'projectId' | 'createdAt' | 'updatedAt'>) => void;
-  updateTask: (projectId: string, taskId: string, data: Partial<Omit<Task, 'id' | 'projectId' | 'createdAt'>>) => void;
-  deleteTask: (projectId: string, taskId: string) => void;
-
-  addDevLog: (data: Omit<DevLogEntry, 'id' | 'createdAt' | 'updatedAt'>) => void;
-  updateDevLog: (id: string, data: Partial<Omit<DevLogEntry, 'id' | 'createdAt'>>) => void;
-  deleteDevLog: (id: string) => void;
-
-  addLearning: (data: Omit<Learning, 'id' | 'createdAt' | 'updatedAt'>) => void;
-  updateLearning: (id: string, data: Partial<Omit<Learning, 'id' | 'createdAt'>>) => void;
-  deleteLearning: (id: string) => void;
-
-  addPomodoroSession: (data: Omit<PomodoroSession, 'id'>) => void;
-
-  selectProject: (id: string | null) => void;
-  setView: (view: View) => void;
-  setFilters: (f: Partial<FilterState>) => void;
-  resetFilters: () => void;
-  importState: (s: AppState) => void;
-}
+import React, { createContext, useContext, useEffect, useReducer, useCallback, useRef } from 'react';
+import { useSession } from 'next-auth/react';
+import {
+  AppState, FilterState, Area, Project, Task, InboxItem, Goal, Habit,
+  HabitCompletion, Note, Reminder, WaitingFor, FinanceReceivable, FinancePayable,
+  FinanceExpense, VisionItem, WeeklyReview, FocusSession, AppSettings, Trade, FinanceIncome,
+} from '@/types';
+import { loadState, saveState, createActivity, createEmptyState, mergeStates, normalizeState } from '@/lib/storage';
+import { generateId, nowISO, todayISO, localDayKey, nextDueDate, nextRemindAt } from '@/lib/utils';
 
 type Action =
   | { type: 'HYDRATE'; payload: AppState }
   | { type: 'IMPORT'; payload: AppState }
+  | { type: 'UPDATE_SETTINGS'; data: Partial<AppSettings> }
+  | { type: 'ADD_AREA'; payload: Area }
+  | { type: 'UPDATE_AREA'; id: string; data: Partial<Area> }
+  | { type: 'DELETE_AREA'; id: string }
   | { type: 'ADD_PROJECT'; payload: Project }
   | { type: 'UPDATE_PROJECT'; id: string; data: Partial<Project> }
   | { type: 'DELETE_PROJECT'; id: string }
-  | { type: 'ADD_TASK'; projectId: string; task: Task }
-  | { type: 'UPDATE_TASK'; projectId: string; taskId: string; data: Partial<Task> }
-  | { type: 'DELETE_TASK'; projectId: string; taskId: string }
-  | { type: 'ADD_DEVLOG'; payload: DevLogEntry }
-  | { type: 'UPDATE_DEVLOG'; id: string; data: Partial<DevLogEntry> }
-  | { type: 'DELETE_DEVLOG'; id: string }
-  | { type: 'ADD_LEARNING'; payload: Learning }
-  | { type: 'UPDATE_LEARNING'; id: string; data: Partial<Learning> }
-  | { type: 'DELETE_LEARNING'; id: string }
-  | { type: 'ADD_POMODORO'; payload: PomodoroSession };
+  | { type: 'ADD_TASK'; payload: Task }
+  | { type: 'UPDATE_TASK'; id: string; data: Partial<Task> }
+  | { type: 'DELETE_TASK'; id: string }
+  | { type: 'ADD_INBOX'; payload: InboxItem }
+  | { type: 'UPDATE_INBOX'; id: string; data: Partial<InboxItem> }
+  | { type: 'DELETE_INBOX'; id: string }
+  | { type: 'ADD_GOAL'; payload: Goal }
+  | { type: 'UPDATE_GOAL'; id: string; data: Partial<Goal> }
+  | { type: 'DELETE_GOAL'; id: string }
+  | { type: 'ADD_HABIT'; payload: Habit }
+  | { type: 'UPDATE_HABIT'; id: string; data: Partial<Habit> }
+  | { type: 'DELETE_HABIT'; id: string }
+  | { type: 'ADD_HABIT_COMPLETION'; payload: HabitCompletion }
+  | { type: 'REMOVE_HABIT_COMPLETION'; id: string }
+  | { type: 'ADD_NOTE'; payload: Note }
+  | { type: 'UPDATE_NOTE'; id: string; data: Partial<Note> }
+  | { type: 'DELETE_NOTE'; id: string }
+  | { type: 'ADD_REMINDER'; payload: Reminder }
+  | { type: 'UPDATE_REMINDER'; id: string; data: Partial<Reminder> }
+  | { type: 'DELETE_REMINDER'; id: string }
+  | { type: 'ADD_WAITING'; payload: WaitingFor }
+  | { type: 'UPDATE_WAITING'; id: string; data: Partial<WaitingFor> }
+  | { type: 'DELETE_WAITING'; id: string }
+  | { type: 'ADD_RECEIVABLE'; payload: FinanceReceivable }
+  | { type: 'UPDATE_RECEIVABLE'; id: string; data: Partial<FinanceReceivable> }
+  | { type: 'DELETE_RECEIVABLE'; id: string }
+  | { type: 'ADD_PAYABLE'; payload: FinancePayable }
+  | { type: 'UPDATE_PAYABLE'; id: string; data: Partial<FinancePayable> }
+  | { type: 'DELETE_PAYABLE'; id: string }
+  | { type: 'ADD_EXPENSE'; payload: FinanceExpense }
+  | { type: 'DELETE_EXPENSE'; id: string }
+  | { type: 'ADD_INCOME'; payload: import('@/types').FinanceIncome }
+  | { type: 'DELETE_INCOME'; id: string }
+  | { type: 'ADD_VISION'; payload: VisionItem }
+  | { type: 'UPDATE_VISION'; id: string; data: Partial<VisionItem> }
+  | { type: 'DELETE_VISION'; id: string }
+  | { type: 'ADD_REVIEW'; payload: WeeklyReview }
+  | { type: 'UPDATE_REVIEW'; id: string; data: Partial<WeeklyReview> }
+  | { type: 'ADD_FOCUS_SESSION'; payload: FocusSession }
+  | { type: 'ADD_TRADE'; payload: Trade }
+  | { type: 'UPDATE_TRADE'; id: string; data: Partial<Trade> }
+  | { type: 'DELETE_TRADE'; id: string }
+  | { type: 'TOGGLE_HABIT_COMPLETION'; habitId: string; date: string };
+
+function pushActivity(state: AppState, entry: ReturnType<typeof createActivity>): AppState {
+  return { ...state, activity: [entry, ...state.activity].slice(0, 2000) };
+}
 
 function reducer(state: AppState, action: Action): AppState {
   switch (action.type) {
@@ -62,77 +74,191 @@ function reducer(state: AppState, action: Action): AppState {
     case 'IMPORT':
       return action.payload;
 
+    case 'UPDATE_SETTINGS':
+      return { ...state, settings: { ...state.settings, ...action.data } };
+
+    case 'ADD_AREA':
+      return pushActivity({ ...state, areas: [...state.areas, action.payload] },
+        createActivity('area_created', `Area "${action.payload.name}" created`, 'area', action.payload.id));
+    case 'UPDATE_AREA':
+      return { ...state, areas: state.areas.map(a => a.id === action.id ? { ...a, ...action.data, updatedAt: nowISO() } : a) };
+    case 'DELETE_AREA':
+      return { ...state, areas: state.areas.filter(a => a.id !== action.id) };
+
     case 'ADD_PROJECT':
-      return {
-        ...state,
-        projects: [...state.projects, action.payload],
-        activity: [createActivity('project_created', `Project "${action.payload.name}" created`), ...state.activity].slice(0, 50),
-      };
+      return pushActivity({ ...state, projects: [...state.projects, action.payload] },
+        createActivity('project_created', `Project "${action.payload.name}" created`, 'project', action.payload.id));
     case 'UPDATE_PROJECT':
-      return {
+      return pushActivity({
         ...state,
-        projects: state.projects.map(p => p.id === action.id ? { ...p, ...action.data, updatedAt: new Date().toISOString() } : p),
-        activity: [createActivity('project_updated', `Project "${state.projects.find(p => p.id === action.id)?.name}" updated`, action.id), ...state.activity].slice(0, 50),
-      };
-    case 'DELETE_PROJECT': {
-      const proj = state.projects.find(p => p.id === action.id);
+        projects: state.projects.map(p => p.id === action.id ? { ...p, ...action.data, updatedAt: nowISO() } : p),
+      }, createActivity('project_updated', `Project updated`, 'project', action.id));
+    case 'DELETE_PROJECT':
       return {
         ...state,
         projects: state.projects.filter(p => p.id !== action.id),
-        activity: [createActivity('project_deleted', `Project "${proj?.name}" deleted`), ...state.activity].slice(0, 50),
+        tasks: state.tasks.filter(t => t.projectId !== action.id),
       };
-    }
+
     case 'ADD_TASK':
-      return {
-        ...state,
-        projects: state.projects.map(p => p.id === action.projectId ? { ...p, tasks: [...p.tasks, action.task] } : p),
-        activity: [createActivity('task_created', `Task "${action.task.title}" added`, action.projectId, action.task.id), ...state.activity].slice(0, 50),
-      };
+      return pushActivity({ ...state, tasks: [...state.tasks, action.payload] },
+        createActivity('task_created', `Task "${action.payload.title}" created`, 'task', action.payload.id));
     case 'UPDATE_TASK': {
-      let activityType: 'task_updated' | 'task_completed' = 'task_updated';
-      let msg = '';
-      const newProjects = state.projects.map(p => {
-        if (p.id !== action.projectId) return p;
-        return {
-          ...p, tasks: p.tasks.map(t => {
-            if (t.id !== action.taskId) return t;
-            if (action.data.status === 'done' && t.status !== 'done') { activityType = 'task_completed'; msg = `Task "${t.title}" marked as done`; }
-            else { msg = `Task "${t.title}" updated`; }
-            return { ...t, ...action.data, updatedAt: new Date().toISOString() };
-          }),
-        };
-      });
-      return { ...state, projects: newProjects, activity: [createActivity(activityType, msg, action.projectId, action.taskId), ...state.activity].slice(0, 50) };
+      const task = state.tasks.find(t => t.id === action.id);
+      const completed = action.data.status === 'completed' && task?.status !== 'completed';
+
+      // Recurring tasks don't complete — they roll forward to the next due date.
+      if (completed && task?.isRecurring) {
+        const rule = task.recurrenceRule ?? 'daily';
+        const due = nextDueDate(rule, task.dueDate);
+        return pushActivity({
+          ...state,
+          tasks: state.tasks.map(t => t.id === action.id ? {
+            ...t, ...action.data, status: 'todo' as const, completedAt: null, dueDate: due, updatedAt: nowISO(),
+          } : t),
+        }, createActivity('task_completed', `Task "${task.title}" completed — next on ${due}`, 'task', action.id));
+      }
+
+      return pushActivity({
+        ...state,
+        tasks: state.tasks.map(t => t.id === action.id ? {
+          ...t, ...action.data, updatedAt: nowISO(),
+          completedAt: action.data.status === 'completed' ? nowISO() : action.data.status ? t.completedAt : t.completedAt,
+        } : t),
+      }, createActivity(completed ? 'task_completed' : 'task_updated', completed ? `Task "${task?.title}" completed` : `Task updated`, 'task', action.id));
     }
-    case 'DELETE_TASK': {
-      let taskName = '';
+    case 'DELETE_TASK':
+      return { ...state, tasks: state.tasks.filter(t => t.id !== action.id) };
+
+    case 'ADD_INBOX':
+      return { ...state, inboxItems: [action.payload, ...state.inboxItems] };
+    case 'UPDATE_INBOX':
+      return { ...state, inboxItems: state.inboxItems.map(i => i.id === action.id ? { ...i, ...action.data } : i) };
+    case 'DELETE_INBOX':
+      return { ...state, inboxItems: state.inboxItems.filter(i => i.id !== action.id) };
+
+    case 'ADD_GOAL':
+      return pushActivity({ ...state, goals: [...state.goals, action.payload] },
+        createActivity('goal_created', `Goal "${action.payload.title}" created`, 'goal', action.payload.id));
+    case 'UPDATE_GOAL':
+      return { ...state, goals: state.goals.map(g => g.id === action.id ? { ...g, ...action.data, updatedAt: nowISO() } : g) };
+    case 'DELETE_GOAL':
+      return { ...state, goals: state.goals.filter(g => g.id !== action.id) };
+
+    case 'ADD_HABIT':
+      return { ...state, habits: [...state.habits, action.payload] };
+    case 'UPDATE_HABIT':
+      return { ...state, habits: state.habits.map(h => h.id === action.id ? { ...h, ...action.data, updatedAt: nowISO() } : h) };
+    case 'DELETE_HABIT':
       return {
         ...state,
-        projects: state.projects.map(p => {
-          if (p.id !== action.projectId) return p;
-          taskName = p.tasks.find(t => t.id === action.taskId)?.title ?? 'Task';
-          return { ...p, tasks: p.tasks.filter(t => t.id !== action.taskId) };
-        }),
-        activity: [createActivity('task_deleted', `Task "${taskName}" deleted`, action.projectId), ...state.activity].slice(0, 50),
+        habits: state.habits.filter(h => h.id !== action.id),
+        habitCompletions: state.habitCompletions.filter(c => c.habitId !== action.id),
       };
+    case 'ADD_HABIT_COMPLETION':
+      return { ...state, habitCompletions: [...state.habitCompletions, action.payload] };
+    case 'REMOVE_HABIT_COMPLETION':
+      return { ...state, habitCompletions: state.habitCompletions.filter(c => c.id !== action.id) };
+
+    case 'ADD_NOTE':
+      return pushActivity({ ...state, notes: [action.payload, ...state.notes] },
+        createActivity('note_created', `Note "${action.payload.title}" created`, 'note', action.payload.id));
+    case 'UPDATE_NOTE':
+      return { ...state, notes: state.notes.map(n => n.id === action.id ? { ...n, ...action.data, updatedAt: nowISO() } : n) };
+    case 'DELETE_NOTE':
+      return { ...state, notes: state.notes.filter(n => n.id !== action.id) };
+
+    case 'ADD_REMINDER':
+      return { ...state, reminders: [...state.reminders, action.payload] };
+    case 'UPDATE_REMINDER':
+      return {
+        ...state,
+        reminders: state.reminders.map(r => {
+          if (r.id !== action.id) return r;
+          // Recurring reminders reschedule instead of being dismissed.
+          const dismissing = (action.data.status === 'dismissed' || action.data.status === 'sent') && r.status === 'pending';
+          if (dismissing && r.recurrenceRule) {
+            return { ...r, ...action.data, status: 'pending' as const, remindAt: nextRemindAt(r.recurrenceRule, r.remindAt) };
+          }
+          return { ...r, ...action.data };
+        }),
+      };
+    case 'DELETE_REMINDER':
+      return { ...state, reminders: state.reminders.filter(r => r.id !== action.id) };
+
+    case 'ADD_WAITING':
+      return { ...state, waitingFor: [...state.waitingFor, action.payload] };
+    case 'UPDATE_WAITING':
+      return { ...state, waitingFor: state.waitingFor.map(w => w.id === action.id ? { ...w, ...action.data, updatedAt: nowISO() } : w) };
+    case 'DELETE_WAITING':
+      return { ...state, waitingFor: state.waitingFor.filter(w => w.id !== action.id) };
+
+    case 'ADD_RECEIVABLE':
+      return { ...state, receivables: [...state.receivables, action.payload] };
+    case 'UPDATE_RECEIVABLE':
+      return { ...state, receivables: state.receivables.map(r => r.id === action.id ? { ...r, ...action.data, updatedAt: nowISO() } : r) };
+    case 'DELETE_RECEIVABLE':
+      return { ...state, receivables: state.receivables.filter(r => r.id !== action.id) };
+
+    case 'ADD_PAYABLE':
+      return { ...state, payables: [...state.payables, action.payload] };
+    case 'UPDATE_PAYABLE':
+      return { ...state, payables: state.payables.map(p => p.id === action.id ? { ...p, ...action.data, updatedAt: nowISO() } : p) };
+    case 'DELETE_PAYABLE':
+      return { ...state, payables: state.payables.filter(p => p.id !== action.id) };
+
+    case 'ADD_EXPENSE':
+      return { ...state, expenses: [action.payload, ...state.expenses] };
+    case 'DELETE_EXPENSE':
+      return { ...state, expenses: state.expenses.filter(e => e.id !== action.id) };
+
+    case 'ADD_INCOME':
+      return { ...state, incomes: [action.payload, ...state.incomes] };
+    case 'DELETE_INCOME':
+      return { ...state, incomes: state.incomes.filter(i => i.id !== action.id) };
+
+    case 'ADD_VISION':
+      return { ...state, visionItems: [...state.visionItems, action.payload] };
+    case 'UPDATE_VISION':
+      return { ...state, visionItems: state.visionItems.map(v => v.id === action.id ? { ...v, ...action.data, updatedAt: nowISO() } : v) };
+    case 'DELETE_VISION':
+      return { ...state, visionItems: state.visionItems.filter(v => v.id !== action.id) };
+
+    case 'ADD_REVIEW':
+      return { ...state, weeklyReviews: [action.payload, ...state.weeklyReviews] };
+    case 'UPDATE_REVIEW':
+      return { ...state, weeklyReviews: state.weeklyReviews.map(r => r.id === action.id ? { ...r, ...action.data } : r) };
+
+    case 'ADD_FOCUS_SESSION':
+      return { ...state, focusSessions: [action.payload, ...state.focusSessions] };
+
+    case 'ADD_TRADE':
+      return { ...state, trades: [action.payload, ...state.trades] };
+    case 'UPDATE_TRADE':
+      return { ...state, trades: state.trades.map(t => t.id === action.id ? { ...t, ...action.data, updatedAt: nowISO() } : t) };
+    case 'DELETE_TRADE':
+      return { ...state, trades: state.trades.filter(t => t.id !== action.id) };
+
+    case 'TOGGLE_HABIT_COMPLETION': {
+      const habit = state.habits.find(h => h.id === action.habitId);
+      const dayKey = localDayKey(action.date);
+      const existing = state.habitCompletions.find(
+        c => c.habitId === action.habitId && localDayKey(c.completedAt) === dayKey
+      );
+      if (existing) {
+        return { ...state, habitCompletions: state.habitCompletions.filter(c => c.id !== existing.id) };
+      }
+      // For past days store local noon so the completion lands on the right day.
+      const completedAt = action.date.includes('T')
+        ? action.date
+        : dayKey === todayISO() ? new Date().toISOString() : `${dayKey}T12:00:00`;
+      return pushActivity({
+        ...state,
+        habitCompletions: [...state.habitCompletions, {
+          id: generateId(), habitId: action.habitId, completedAt, value: 1, notes: '',
+        }],
+      }, createActivity('habit_completed', `Habit "${habit?.name ?? 'Habit'}" logged`, 'habit', action.habitId));
     }
-
-    case 'ADD_DEVLOG':
-      return { ...state, devLog: [action.payload, ...state.devLog] };
-    case 'UPDATE_DEVLOG':
-      return { ...state, devLog: state.devLog.map(e => e.id === action.id ? { ...e, ...action.data, updatedAt: new Date().toISOString() } : e) };
-    case 'DELETE_DEVLOG':
-      return { ...state, devLog: state.devLog.filter(e => e.id !== action.id) };
-
-    case 'ADD_LEARNING':
-      return { ...state, learnings: [action.payload, ...state.learnings] };
-    case 'UPDATE_LEARNING':
-      return { ...state, learnings: state.learnings.map(l => l.id === action.id ? { ...l, ...action.data, updatedAt: new Date().toISOString() } : l) };
-    case 'DELETE_LEARNING':
-      return { ...state, learnings: state.learnings.filter(l => l.id !== action.id) };
-
-    case 'ADD_POMODORO':
-      return { ...state, pomodoroSessions: [action.payload, ...state.pomodoroSessions] };
 
     default:
       return state;
@@ -140,81 +266,333 @@ function reducer(state: AppState, action: Action): AppState {
 }
 
 const DEFAULT_FILTERS: FilterState = {
-  search: '', status: 'all', priority: 'all', dueDateFilter: 'all', sortBy: 'deadline', sortOrder: 'asc',
+  search: '', status: 'all', priority: 'all', dueDateFilter: 'all',
+  sortBy: 'deadline', sortOrder: 'asc', areaId: null,
 };
+
+export interface AppContextValue {
+  state: AppState;
+  filters: FilterState;
+  hydrated: boolean;
+  setFilters: (f: Partial<FilterState>) => void;
+  resetFilters: () => void;
+  importState: (s: AppState) => void;
+  updateSettings: (data: Partial<AppSettings>) => void;
+  addArea: (data: Omit<Area, 'id' | 'createdAt' | 'updatedAt'>) => void;
+  updateArea: (id: string, data: Partial<Area>) => void;
+  deleteArea: (id: string) => void;
+  addProject: (data: Omit<Project, 'id' | 'createdAt' | 'updatedAt'>) => void;
+  updateProject: (id: string, data: Partial<Project>) => void;
+  deleteProject: (id: string) => void;
+  addTask: (data: Omit<Task, 'id' | 'createdAt' | 'updatedAt' | 'completedAt'>) => void;
+  updateTask: (id: string, data: Partial<Task>) => void;
+  deleteTask: (id: string) => void;
+  addInboxItem: (data: Omit<InboxItem, 'id' | 'createdAt' | 'processed' | 'convertedToType' | 'convertedToId'>) => void;
+  updateInboxItem: (id: string, data: Partial<InboxItem>) => void;
+  deleteInboxItem: (id: string) => void;
+  processInboxToTask: (inboxId: string, taskData: Omit<Task, 'id' | 'createdAt' | 'updatedAt' | 'completedAt'>) => void;
+  processInboxToNote: (inboxId: string, noteData: Omit<Note, 'id' | 'createdAt' | 'updatedAt'>) => void;
+  addGoal: (data: Omit<Goal, 'id' | 'createdAt' | 'updatedAt'>) => void;
+  updateGoal: (id: string, data: Partial<Goal>) => void;
+  deleteGoal: (id: string) => void;
+  addHabit: (data: Omit<Habit, 'id' | 'createdAt' | 'updatedAt'>) => void;
+  updateHabit: (id: string, data: Partial<Habit>) => void;
+  deleteHabit: (id: string) => void;
+  toggleHabitCompletion: (habitId: string, date?: string) => void;
+  addNote: (data: Omit<Note, 'id' | 'createdAt' | 'updatedAt'>) => void;
+  updateNote: (id: string, data: Partial<Note>) => void;
+  deleteNote: (id: string) => void;
+  addReminder: (data: Omit<Reminder, 'id' | 'createdAt' | 'status'>) => void;
+  updateReminder: (id: string, data: Partial<Reminder>) => void;
+  deleteReminder: (id: string) => void;
+  addWaitingFor: (data: Omit<WaitingFor, 'id' | 'createdAt' | 'updatedAt' | 'completedAt'>) => void;
+  updateWaitingFor: (id: string, data: Partial<WaitingFor>) => void;
+  deleteWaitingFor: (id: string) => void;
+  addReceivable: (data: Omit<FinanceReceivable, 'id' | 'createdAt' | 'updatedAt'>) => void;
+  updateReceivable: (id: string, data: Partial<FinanceReceivable>) => void;
+  deleteReceivable: (id: string) => void;
+  addPayable: (data: Omit<FinancePayable, 'id' | 'createdAt' | 'updatedAt'>) => void;
+  updatePayable: (id: string, data: Partial<FinancePayable>) => void;
+  deletePayable: (id: string) => void;
+  addExpense: (data: Omit<FinanceExpense, 'id' | 'createdAt'>) => void;
+  deleteExpense: (id: string) => void;
+  addIncome: (data: Omit<FinanceIncome, 'id' | 'createdAt'>) => void;
+  deleteIncome: (id: string) => void;
+  addVisionItem: (data: Omit<VisionItem, 'id' | 'createdAt' | 'updatedAt'>) => void;
+  updateVisionItem: (id: string, data: Partial<VisionItem>) => void;
+  deleteVisionItem: (id: string) => void;
+  addWeeklyReview: (data: Omit<WeeklyReview, 'id' | 'createdAt'>) => void;
+  updateWeeklyReview: (id: string, data: Partial<WeeklyReview>) => void;
+  addFocusSession: (data: Omit<FocusSession, 'id'>) => void;
+  addTrade: (data: Omit<Trade, 'id' | 'createdAt' | 'updatedAt'>) => void;
+  updateTrade: (id: string, data: Partial<Trade>) => void;
+  deleteTrade: (id: string) => void;
+  setTopPriorities: (taskIds: string[]) => void;
+  toggleTopPriority: (taskId: string) => void;
+  syncStatus: 'idle' | 'saving' | 'saved' | 'error';
+}
 
 const AppContext = createContext<AppContextValue | null>(null);
 
+function makeEntity<T extends { id: string; createdAt: string; updatedAt: string }>(
+  data: Omit<T, 'id' | 'createdAt' | 'updatedAt'>
+): T {
+  const now = nowISO();
+  return { ...data, id: generateId(), createdAt: now, updatedAt: now } as T;
+}
+
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, { projects: [], activity: [], devLog: [], learnings: [], pomodoroSessions: [] });
+  const { status } = useSession();
+  const [state, dispatch] = useReducer(reducer, createEmptyState());
   const [filters, setFiltersState] = React.useState<FilterState>(DEFAULT_FILTERS);
-  const [selectedProjectId, setSelectedProjectId] = React.useState<string | null>(null);
-  const [view, setViewState] = React.useState<View>('dashboard');
   const [hydrated, setHydrated] = React.useState(false);
+  const [syncStatus, setSyncStatus] = React.useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const skipNextSave = useRef(true);
+  // Server updatedAt from the last successful sync, for conflict detection.
+  const lastSyncedAt = useRef<string | null>(null);
 
+  // Hydrate: from cloud when authenticated, from localStorage otherwise.
   useEffect(() => {
-    const saved = loadState();
-    dispatch({ type: 'HYDRATE', payload: saved });
-    setHydrated(true);
-  }, []);
+    if (status === 'loading') return;
 
+    if (status === 'unauthenticated') {
+      skipNextSave.current = true;
+      dispatch({ type: 'HYDRATE', payload: loadState() });
+      setHydrated(true);
+      return;
+    }
+
+    let cancelled = false;
+    fetch('/api/sync')
+      .then(res => {
+        if (!res.ok) throw new Error('Failed to load');
+        return res.json() as Promise<{ state: AppState; updatedAt?: string }>;
+      })
+      .then(data => {
+        if (cancelled) return;
+        lastSyncedAt.current = data.updatedAt ?? null;
+        skipNextSave.current = true;
+        dispatch({ type: 'HYDRATE', payload: data.state });
+        saveState(data.state);
+      })
+      .catch(() => {
+        // Offline / server error: fall back to the local mirror.
+        if (!cancelled) {
+          skipNextSave.current = true;
+          dispatch({ type: 'HYDRATE', payload: loadState() });
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setHydrated(true);
+      });
+
+    return () => { cancelled = true; };
+  }, [status]);
+
+  // Auto-save: mirror to localStorage immediately, sync to cloud (debounced).
   useEffect(() => {
-    if (hydrated) saveState(state);
-  }, [state, hydrated]);
+    if (!hydrated) return;
 
-  const addProject = useCallback((data: Omit<Project, 'id' | 'createdAt' | 'updatedAt' | 'tasks'>) => {
-    const now = new Date().toISOString();
-    dispatch({ type: 'ADD_PROJECT', payload: { ...data, id: generateId(), tasks: [], createdAt: now, updatedAt: now } });
-  }, []);
-  const updateProject = useCallback((id: string, data: Partial<Omit<Project, 'id' | 'createdAt' | 'tasks'>>) => { dispatch({ type: 'UPDATE_PROJECT', id, data }); }, []);
-  const deleteProject = useCallback((id: string) => { dispatch({ type: 'DELETE_PROJECT', id }); }, []);
+    if (skipNextSave.current) {
+      skipNextSave.current = false;
+      return;
+    }
 
-  const addTask = useCallback((projectId: string, data: Omit<Task, 'id' | 'projectId' | 'createdAt' | 'updatedAt'>) => {
-    const now = new Date().toISOString();
-    dispatch({ type: 'ADD_TASK', projectId, task: { ...data, id: generateId(), projectId, createdAt: now, updatedAt: now } });
-  }, []);
-  const updateTask = useCallback((projectId: string, taskId: string, data: Partial<Omit<Task, 'id' | 'projectId' | 'createdAt'>>) => { dispatch({ type: 'UPDATE_TASK', projectId, taskId, data }); }, []);
-  const deleteTask = useCallback((projectId: string, taskId: string) => { dispatch({ type: 'DELETE_TASK', projectId, taskId }); }, []);
+    saveState(state);
 
-  const addDevLog = useCallback((data: Omit<DevLogEntry, 'id' | 'createdAt' | 'updatedAt'>) => {
-    const now = new Date().toISOString();
-    dispatch({ type: 'ADD_DEVLOG', payload: { ...data, id: generateId(), createdAt: now, updatedAt: now } });
-  }, []);
-  const updateDevLog = useCallback((id: string, data: Partial<Omit<DevLogEntry, 'id' | 'createdAt'>>) => { dispatch({ type: 'UPDATE_DEVLOG', id, data }); }, []);
-  const deleteDevLog = useCallback((id: string) => { dispatch({ type: 'DELETE_DEVLOG', id }); }, []);
+    if (status !== 'authenticated') return;
 
-  const addLearning = useCallback((data: Omit<Learning, 'id' | 'createdAt' | 'updatedAt'>) => {
-    const now = new Date().toISOString();
-    dispatch({ type: 'ADD_LEARNING', payload: { ...data, id: generateId(), createdAt: now, updatedAt: now } });
-  }, []);
-  const updateLearning = useCallback((id: string, data: Partial<Omit<Learning, 'id' | 'createdAt'>>) => { dispatch({ type: 'UPDATE_LEARNING', id, data }); }, []);
-  const deleteLearning = useCallback((id: string) => { dispatch({ type: 'DELETE_LEARNING', id }); }, []);
+    setSyncStatus('saving');
+    const timer = setTimeout(() => {
+      fetch('/api/sync', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ state, baseUpdatedAt: lastSyncedAt.current }),
+      })
+        .then(async res => {
+          if (res.status === 409) {
+            // Another device saved in between — merge and re-sync.
+            const payload = await res.json() as { state: AppState; updatedAt?: string };
+            lastSyncedAt.current = payload.updatedAt ?? null;
+            const merged = mergeStates(normalizeState(payload.state), state);
+            dispatch({ type: 'HYDRATE', payload: merged });
+            return;
+          }
+          if (!res.ok) throw new Error('save failed');
+          const payload = await res.json() as { updatedAt?: string };
+          lastSyncedAt.current = payload.updatedAt ?? lastSyncedAt.current;
+          setSyncStatus('saved');
+        })
+        .catch(() => setSyncStatus('error'));
+    }, 900);
 
-  const addPomodoroSession = useCallback((data: Omit<PomodoroSession, 'id'>) => {
-    dispatch({ type: 'ADD_POMODORO', payload: { ...data, id: generateId() } });
-  }, []);
+    return () => clearTimeout(timer);
+  }, [state, hydrated, status]);
 
-  const selectProject = useCallback((id: string | null) => {
-    setSelectedProjectId(id);
-    setViewState(id ? 'project' : 'dashboard');
-  }, []);
-  const setView = useCallback((v: View) => {
-    setViewState(v);
-    if (v !== 'project') setSelectedProjectId(null);
-  }, []);
-  const setFilters = useCallback((f: Partial<FilterState>) => { setFiltersState(prev => ({ ...prev, ...f })); }, []);
+  // Keep the browser's timezone in settings so server-side calendar sync
+  // can build events on the correct local day/time.
+  useEffect(() => {
+    if (!hydrated) return;
+    const tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz && state.settings.timeZone !== tz) {
+      dispatch({ type: 'UPDATE_SETTINGS', data: { timeZone: tz } });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated]);
+
+  const setFilters = useCallback((f: Partial<FilterState>) => setFiltersState(prev => ({ ...prev, ...f })), []);
   const resetFilters = useCallback(() => setFiltersState(DEFAULT_FILTERS), []);
-  const importState = useCallback((s: AppState) => { dispatch({ type: 'IMPORT', payload: s }); }, []);
+  const importState = useCallback((s: AppState) => dispatch({ type: 'IMPORT', payload: s }), []);
+  const updateSettings = useCallback((data: Partial<AppSettings>) => dispatch({ type: 'UPDATE_SETTINGS', data }), []);
+
+  const addArea = useCallback((data: Omit<Area, 'id' | 'createdAt' | 'updatedAt'>) => {
+    dispatch({ type: 'ADD_AREA', payload: makeEntity<Area>(data) });
+  }, []);
+  const updateArea = useCallback((id: string, data: Partial<Area>) => dispatch({ type: 'UPDATE_AREA', id, data }), []);
+  const deleteArea = useCallback((id: string) => dispatch({ type: 'DELETE_AREA', id }), []);
+
+  const addProject = useCallback((data: Omit<Project, 'id' | 'createdAt' | 'updatedAt'>) => {
+    dispatch({ type: 'ADD_PROJECT', payload: makeEntity<Project>(data) });
+  }, []);
+  const updateProject = useCallback((id: string, data: Partial<Project>) => dispatch({ type: 'UPDATE_PROJECT', id, data }), []);
+  const deleteProject = useCallback((id: string) => dispatch({ type: 'DELETE_PROJECT', id }), []);
+
+  const addTask = useCallback((data: Omit<Task, 'id' | 'createdAt' | 'updatedAt' | 'completedAt'>) => {
+    const now = nowISO();
+    dispatch({ type: 'ADD_TASK', payload: { ...data, id: generateId(), createdAt: now, updatedAt: now, completedAt: null } });
+  }, []);
+  const updateTask = useCallback((id: string, data: Partial<Task>) => dispatch({ type: 'UPDATE_TASK', id, data }), []);
+  const deleteTask = useCallback((id: string) => dispatch({ type: 'DELETE_TASK', id }), []);
+
+  const addInboxItem = useCallback((data: Omit<InboxItem, 'id' | 'createdAt' | 'processed' | 'convertedToType' | 'convertedToId'>) => {
+    dispatch({ type: 'ADD_INBOX', payload: { ...data, id: generateId(), processed: false, convertedToType: null, convertedToId: null, createdAt: nowISO() } });
+  }, []);
+  const updateInboxItem = useCallback((id: string, data: Partial<InboxItem>) => dispatch({ type: 'UPDATE_INBOX', id, data }), []);
+  const deleteInboxItem = useCallback((id: string) => dispatch({ type: 'DELETE_INBOX', id }), []);
+
+  const processInboxToTask = useCallback((inboxId: string, taskData: Omit<Task, 'id' | 'createdAt' | 'updatedAt' | 'completedAt'>) => {
+    const now = nowISO();
+    const task: Task = { ...taskData, id: generateId(), createdAt: now, updatedAt: now, completedAt: null };
+    dispatch({ type: 'ADD_TASK', payload: task });
+    dispatch({ type: 'UPDATE_INBOX', id: inboxId, data: { processed: true, convertedToType: 'task', convertedToId: task.id } });
+  }, []);
+
+  const processInboxToNote = useCallback((inboxId: string, noteData: Omit<Note, 'id' | 'createdAt' | 'updatedAt'>) => {
+    const note = makeEntity<Note>(noteData);
+    dispatch({ type: 'ADD_NOTE', payload: note });
+    dispatch({ type: 'UPDATE_INBOX', id: inboxId, data: { processed: true, convertedToType: 'note', convertedToId: note.id } });
+  }, []);
+
+  const addGoal = useCallback((data: Omit<Goal, 'id' | 'createdAt' | 'updatedAt'>) => {
+    dispatch({ type: 'ADD_GOAL', payload: makeEntity<Goal>(data) });
+  }, []);
+  const updateGoal = useCallback((id: string, data: Partial<Goal>) => dispatch({ type: 'UPDATE_GOAL', id, data }), []);
+  const deleteGoal = useCallback((id: string) => dispatch({ type: 'DELETE_GOAL', id }), []);
+
+  const addHabit = useCallback((data: Omit<Habit, 'id' | 'createdAt' | 'updatedAt'>) => {
+    dispatch({ type: 'ADD_HABIT', payload: makeEntity<Habit>(data) });
+  }, []);
+  const updateHabit = useCallback((id: string, data: Partial<Habit>) => dispatch({ type: 'UPDATE_HABIT', id, data }), []);
+  const deleteHabit = useCallback((id: string) => dispatch({ type: 'DELETE_HABIT', id }), []);
+
+  const toggleHabitCompletion = useCallback((habitId: string, date?: string) => {
+    dispatch({ type: 'TOGGLE_HABIT_COMPLETION', habitId, date: date ?? todayISO() });
+  }, []);
+
+  const addNote = useCallback((data: Omit<Note, 'id' | 'createdAt' | 'updatedAt'>) => {
+    dispatch({ type: 'ADD_NOTE', payload: makeEntity<Note>(data) });
+  }, []);
+  const updateNote = useCallback((id: string, data: Partial<Note>) => dispatch({ type: 'UPDATE_NOTE', id, data }), []);
+  const deleteNote = useCallback((id: string) => dispatch({ type: 'DELETE_NOTE', id }), []);
+
+  const addReminder = useCallback((data: Omit<Reminder, 'id' | 'createdAt' | 'status'>) => {
+    dispatch({ type: 'ADD_REMINDER', payload: { ...data, id: generateId(), status: 'pending', createdAt: nowISO() } });
+  }, []);
+  const updateReminder = useCallback((id: string, data: Partial<Reminder>) => dispatch({ type: 'UPDATE_REMINDER', id, data }), []);
+  const deleteReminder = useCallback((id: string) => dispatch({ type: 'DELETE_REMINDER', id }), []);
+
+  const addWaitingFor = useCallback((data: Omit<WaitingFor, 'id' | 'createdAt' | 'updatedAt' | 'completedAt'>) => {
+    const now = nowISO();
+    dispatch({ type: 'ADD_WAITING', payload: { ...data, id: generateId(), createdAt: now, updatedAt: now, completedAt: null } });
+  }, []);
+  const updateWaitingFor = useCallback((id: string, data: Partial<WaitingFor>) => dispatch({ type: 'UPDATE_WAITING', id, data }), []);
+  const deleteWaitingFor = useCallback((id: string) => dispatch({ type: 'DELETE_WAITING', id }), []);
+
+  const addReceivable = useCallback((data: Omit<FinanceReceivable, 'id' | 'createdAt' | 'updatedAt'>) => {
+    dispatch({ type: 'ADD_RECEIVABLE', payload: makeEntity<FinanceReceivable>(data) });
+  }, []);
+  const updateReceivable = useCallback((id: string, data: Partial<FinanceReceivable>) => dispatch({ type: 'UPDATE_RECEIVABLE', id, data }), []);
+  const deleteReceivable = useCallback((id: string) => dispatch({ type: 'DELETE_RECEIVABLE', id }), []);
+
+  const addPayable = useCallback((data: Omit<FinancePayable, 'id' | 'createdAt' | 'updatedAt'>) => {
+    dispatch({ type: 'ADD_PAYABLE', payload: makeEntity<FinancePayable>(data) });
+  }, []);
+  const updatePayable = useCallback((id: string, data: Partial<FinancePayable>) => dispatch({ type: 'UPDATE_PAYABLE', id, data }), []);
+  const deletePayable = useCallback((id: string) => dispatch({ type: 'DELETE_PAYABLE', id }), []);
+
+  const addExpense = useCallback((data: Omit<FinanceExpense, 'id' | 'createdAt'>) => {
+    dispatch({ type: 'ADD_EXPENSE', payload: { ...data, id: generateId(), createdAt: nowISO() } });
+  }, []);
+  const deleteExpense = useCallback((id: string) => dispatch({ type: 'DELETE_EXPENSE', id }), []);
+  const addIncome = useCallback((data: Omit<FinanceIncome, 'id' | 'createdAt'>) => {
+    dispatch({ type: 'ADD_INCOME', payload: { ...data, id: generateId(), createdAt: nowISO() } });
+  }, []);
+  const deleteIncome = useCallback((id: string) => dispatch({ type: 'DELETE_INCOME', id }), []);
+
+  const addVisionItem = useCallback((data: Omit<VisionItem, 'id' | 'createdAt' | 'updatedAt'>) => {
+    dispatch({ type: 'ADD_VISION', payload: makeEntity<VisionItem>(data) });
+  }, []);
+  const updateVisionItem = useCallback((id: string, data: Partial<VisionItem>) => dispatch({ type: 'UPDATE_VISION', id, data }), []);
+  const deleteVisionItem = useCallback((id: string) => dispatch({ type: 'DELETE_VISION', id }), []);
+
+  const addWeeklyReview = useCallback((data: Omit<WeeklyReview, 'id' | 'createdAt'>) => {
+    dispatch({ type: 'ADD_REVIEW', payload: { ...data, id: generateId(), createdAt: nowISO() } });
+  }, []);
+  const updateWeeklyReview = useCallback((id: string, data: Partial<WeeklyReview>) => dispatch({ type: 'UPDATE_REVIEW', id, data }), []);
+
+  const addFocusSession = useCallback((data: Omit<FocusSession, 'id'>) => {
+    dispatch({ type: 'ADD_FOCUS_SESSION', payload: { ...data, id: generateId() } });
+  }, []);
+
+  const addTrade = useCallback((data: Omit<Trade, 'id' | 'createdAt' | 'updatedAt'>) => {
+    const now = nowISO();
+    dispatch({ type: 'ADD_TRADE', payload: { ...data, id: generateId(), createdAt: now, updatedAt: now } });
+  }, []);
+  const updateTrade = useCallback((id: string, data: Partial<Trade>) => dispatch({ type: 'UPDATE_TRADE', id, data }), []);
+  const deleteTrade = useCallback((id: string) => dispatch({ type: 'DELETE_TRADE', id }), []);
+
+  const setTopPriorities = useCallback((taskIds: string[]) => {
+    dispatch({ type: 'UPDATE_SETTINGS', data: { topPriorityTaskIds: taskIds.slice(0, 3) } });
+  }, []);
+
+  const toggleTopPriority = useCallback((taskId: string) => {
+    const current = state.settings.topPriorityTaskIds;
+    const next = current.includes(taskId)
+      ? current.filter(id => id !== taskId)
+      : [...current, taskId].slice(0, 3);
+    dispatch({ type: 'UPDATE_SETTINGS', data: { topPriorityTaskIds: next } });
+    updateTask(taskId, { isTopPriority: !current.includes(taskId) });
+  }, [state.settings.topPriorityTaskIds, updateTask]);
 
   return (
     <AppContext.Provider value={{
-      state, filters, selectedProjectId, view, hydrated,
+      state, filters, hydrated, syncStatus, setFilters, resetFilters, importState, updateSettings,
+      addArea, updateArea, deleteArea,
       addProject, updateProject, deleteProject,
       addTask, updateTask, deleteTask,
-      addDevLog, updateDevLog, deleteDevLog,
-      addLearning, updateLearning, deleteLearning,
-      addPomodoroSession,
-      selectProject, setView, setFilters, resetFilters, importState,
+      addInboxItem, updateInboxItem, deleteInboxItem, processInboxToTask, processInboxToNote,
+      addGoal, updateGoal, deleteGoal,
+      addHabit, updateHabit, deleteHabit, toggleHabitCompletion,
+      addNote, updateNote, deleteNote,
+      addReminder, updateReminder, deleteReminder,
+      addWaitingFor, updateWaitingFor, deleteWaitingFor,
+      addReceivable, updateReceivable, deleteReceivable,
+      addPayable, updatePayable, deletePayable,
+      addExpense, deleteExpense, addIncome, deleteIncome,
+      addVisionItem, updateVisionItem, deleteVisionItem,
+      addWeeklyReview, updateWeeklyReview,
+      addFocusSession, addTrade, updateTrade, deleteTrade,
+      setTopPriorities, toggleTopPriority,
     }}>
       {children}
     </AppContext.Provider>
